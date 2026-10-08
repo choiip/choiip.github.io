@@ -109,6 +109,13 @@ body {
     scroll-margin-top: 1rem;
 }
 
+/* Four games fit in one row on wide screens */
+@media (min-width: 960px) {
+    .game-grid {
+        grid-template-columns: repeat(4, 1fr);
+    }
+}
+
 .game-card {
     position: relative;
     transition: transform 0.25s ease;
@@ -247,6 +254,11 @@ body {
 .game-card[data-game='breakout'] {
     --card-accent: #fb923c;
     --card-accent-glow: rgba(251, 146, 60, 0.35);
+}
+
+.game-card[data-game='flappy'] {
+    --card-accent: #facc15;
+    --card-accent-glow: rgba(250, 204, 21, 0.35);
 }
 
 .game-icon {

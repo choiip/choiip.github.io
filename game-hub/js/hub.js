@@ -12,7 +12,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const trophyEmpty = document.getElementById('trophy-popover-empty');
     const trophyButtons = document.querySelectorAll('.trophy-btn');
 
-    const GAME_NAMES = { snake: 'Snake', tetris: 'Tetris', breakout: 'Breakout' };
+    const GAME_NAMES = { snake: 'Snake', tetris: 'Tetris', breakout: 'Breakout', flappy: 'Flappy Bird' };
     let activeTrophy = null;
     let hideTimer = null;
 

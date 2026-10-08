@@ -1,19 +1,16 @@
 export function init(container) {
+    const STORAGE_KEY = 'tetris_highscores';
+
     const canvas = document.createElement('canvas');
     canvas.width = 240;
     canvas.height = 400;
-    canvas.style.border = '5px solid #fff';
-    canvas.style.backgroundColor = '#000';
-    canvas.style.display = 'block';
+    canvas.className = 'game-canvas';
 
     const scoreDisplay = document.createElement('div');
-    scoreDisplay.id = 'tetris-score';
-    scoreDisplay.style.fontSize = '24px';
-    scoreDisplay.style.marginBottom = '10px';
-    scoreDisplay.innerText = 'Score: 0';
+    scoreDisplay.className = 'score-display';
+    scoreDisplay.textContent = 'Score: 0';
 
-    container.appendChild(scoreDisplay);
-    container.appendChild(canvas);
+    container.append(scoreDisplay, canvas);
 
     const ctx = canvas.getContext('2d');
     ctx.scale(20, 20);
@@ -38,6 +35,8 @@ export function init(container) {
         'Z': [[1,1,0], [0,1,1], [0,0,0]]
     };
 
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+
     // Audio Context for sound effects
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     function playSound(freq, type, duration) {
@@ -60,6 +59,11 @@ export function init(container) {
         matrix: null,
         color: null
     };
+    let dropCounter = 0;
+    let lastTime = 0;
+    let rafId = null;
+    let isGameOver = false;
+    let destroyed = false;
 
     function createPiece() {
         const types = 'IJLOSTZ';
@@ -109,19 +113,17 @@ export function init(container) {
             rowCount++;
         }
         if (rowCount > 0) {
-            score += rowCount * 100;
-            scoreDisplay.innerText = `Score: ${score}`;
+            score += rowCount * rowCount * 10; // 10 / 40 / 90 / 160
+            scoreDisplay.textContent = `Score: ${score}`;
             playSound(440, 'square', 0.2); // Line clear sound
-            triggerLineAnimation();
+            if (!prefersReducedMotion.matches) {
+                canvas.style.transition = 'transform 0.1s ease';
+                canvas.style.transform = 'scale(1.02)';
+                setTimeout(() => {
+                    canvas.style.transform = 'scale(1)';
+                }, 100);
+            }
         }
-    }
-
-    function triggerLineAnimation() {
-        canvas.style.transition = 'transform 0.1s';
-        canvas.style.transform = 'scale(1.02)';
-        setTimeout(() => {
-            canvas.style.transform = 'scale(1)';
-        }, 100);
     }
 
     function playerDrop() {
@@ -163,56 +165,91 @@ export function init(container) {
 
     function gameOver() {
         isGameOver = true;
-        clearInterval(gameInterval);
-        
-        // Sound effect
+
         playSound(220, 'sawtooth', 0.5);
-        
+
         // Blur canvas
+        canvas.style.transition = 'filter 0.3s ease';
         canvas.style.filter = 'blur(3px)';
-        canvas.style.transition = 'filter 0.3s';
 
-        const initials = prompt(`Game Over! Your score: ${score}\nEnter your initials (3 chars):`);
-        const finalInitials = initials ? initials.substring(0, 3).toUpperCase() : '???';
-        
-        saveHighScore(finalInitials, score);
-        showLeaderboard();
+        showGameOverModal('Game Over');
     }
 
-    function saveHighScore(initials, score) {
-        const scores = JSON.parse(localStorage.getItem('tetris_highscores') || '[]');
-        scores.push({ initials, score, date: new Date().toLocaleDateString() });
+    function getScores() {
+        return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+    }
+
+    function saveHighScore(initials, runScore) {
+        const scores = getScores();
+        scores.push({ initials, score: runScore, date: new Date().toLocaleDateString() });
         scores.sort((a, b) => b.score - a.score);
-        localStorage.setItem('tetris_highscores', JSON.stringify(scores.slice(0, 5)));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(scores.slice(0, 5)));
     }
 
-    function showLeaderboard() {
-        const scores = JSON.parse(localStorage.getItem('tetris_highscores') || '[]');
-        let leaderboardHtml = `<div style="background: rgba(0,0,0,0.9); padding: 20px; border-radius: 10px; color: white; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; border: 2px solid white; box-shadow: 0 0 20px rgba(0,0,0,0.5); z-index: 10;">
-            <h2 style="margin-top: 0;">High Scores</h2>
-            <ul style="list-style: none; padding: 0; font-family: monospace; font-size: 1.2rem;">
-                ${scores.map((s, i) => `<li style="margin-bottom: 5px;">${i+1}. ${s.initials} - ${s.score}</li>`).join('')}
-            </ul>
-            <button id="restart-tetris" style="margin-top: 15px; padding: 10px 20px; cursor: pointer; font-weight: bold; background: #fff; color: #000; border: none; border-radius: 5px;">Play Again</button>
-        </div>`;
-        
+    function escapeHtml(value) {
+        return String(value).replace(/[&<>"']/g, (ch) => (
+            { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]
+        ));
+    }
+
+    function renderLeaderboard() {
+        const scores = getScores();
+        if (scores.length === 0) {
+            return '<li class="empty">No scores yet — be the first!</li>';
+        }
+        return scores
+            .map((s, i) =>
+                `<li><span><span class="rank">${i + 1}.</span><span class="initials">${escapeHtml(s.initials)}</span></span><span class="entry-score">${s.score}</span></li>`
+            )
+            .join('');
+    }
+
+    function showGameOverModal(headline) {
         const overlay = document.createElement('div');
-        overlay.innerHTML = leaderboardHtml;
+        overlay.className = 'modal-overlay';
+        overlay.innerHTML = `
+            <div class="modal" role="dialog" aria-modal="true" aria-labelledby="tetris-modal-title">
+                <h2 id="tetris-modal-title">${headline}</h2>
+                <p class="final-score">Final score: <strong>${score}</strong></p>
+                <ol class="leaderboard" id="tetris-leaderboard" aria-live="polite">${renderLeaderboard()}</ol>
+                <form id="tetris-initials-form" class="initials-form" autocomplete="off">
+                    <label for="tetris-initials">Your Initials</label>
+                    <input id="tetris-initials" name="initials" maxlength="3" placeholder="ALX" spellcheck="false" autocomplete="off">
+                </form>
+                <div class="modal-actions">
+                    <button type="submit" form="tetris-initials-form" id="tetris-save" class="btn btn-primary">Save Score</button>
+                    <button type="button" id="tetris-again" class="btn btn-ghost">Play Again</button>
+                </div>
+            </div>`;
         container.appendChild(overlay);
-        
-        document.getElementById('restart-tetris').addEventListener('click', () => {
+
+        const form = overlay.querySelector('#tetris-initials-form');
+        const input = overlay.querySelector('#tetris-initials');
+        const saveBtn = overlay.querySelector('#tetris-save');
+        let saved = false;
+
+        form.addEventListener('submit', (e) => {
+            e.preventDefault();
+            if (saved) return;
+            saved = true;
+            const initials = (input.value.trim().toUpperCase() || '???').slice(0, 3);
+            saveHighScore(initials, score);
+            overlay.querySelector('#tetris-leaderboard').innerHTML = renderLeaderboard();
+            saveBtn.textContent = 'Saved ✓';
+            saveBtn.disabled = true;
+            input.disabled = true;
+        });
+
+        overlay.querySelector('#tetris-again').addEventListener('click', () => {
             overlay.remove();
             resetGame();
         });
+
+        input.focus();
     }
 
-    let dropCounter = 0;
-    let lastTime = 0;
-    let isGameOver = false;
-    let gameInterval;
-
     function update(time = 0) {
-        if (isGameOver) return;
+        if (isGameOver || destroyed) return;
         const deltaTime = time - lastTime;
         lastTime = time;
 
@@ -222,7 +259,7 @@ export function init(container) {
         }
 
         draw();
-        requestAnimationFrame(update);
+        rafId = requestAnimationFrame(update);
     }
 
     function draw() {
@@ -248,7 +285,7 @@ export function init(container) {
         });
     }
 
-    window.addEventListener('keydown', (e) => {
+    function keyDownHandler(e) {
         if (isGameOver) return;
         switch(e.key) {
             case 'ArrowLeft': playerMove(-1); break;
@@ -256,22 +293,28 @@ export function init(container) {
             case 'ArrowDown': playerDrop(); break;
             case 'ArrowUp': playerRotate(); break;
         }
-    });
+    }
+    window.addEventListener('keydown', keyDownHandler);
 
     function resetGame() {
         arena = Array.from({ length: 20 }, () => Array(12).fill(0));
         score = 0;
-        scoreDisplay.innerText = 'Score: 0';
+        scoreDisplay.textContent = 'Score: 0';
         canvas.style.filter = 'none';
-        playerReset();
+        dropCounter = 0;
+        lastTime = 0;
         isGameOver = false;
-        requestAnimationFrame(update);
+        playerReset();
+        rafId = requestAnimationFrame(update);
     }
 
     resetGame();
+
     return {
         destroy: () => {
-            // Cleanup logic
+            destroyed = true;
+            cancelAnimationFrame(rafId);
+            window.removeEventListener('keydown', keyDownHandler);
         }
     };
 }

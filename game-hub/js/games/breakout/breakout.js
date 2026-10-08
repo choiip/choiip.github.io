@@ -1,19 +1,16 @@
 export function init(container) {
+    const STORAGE_KEY = 'breakout_highscores';
+
     const canvas = document.createElement('canvas');
     canvas.width = 480;
     canvas.height = 320;
-    canvas.style.border = '5px solid #fff';
-    canvas.style.backgroundColor = '#000';
-    canvas.style.display = 'block';
+    canvas.className = 'game-canvas';
 
     const scoreDisplay = document.createElement('div');
-    scoreDisplay.id = 'breakout-score';
-    scoreDisplay.style.fontSize = '24px';
-    scoreDisplay.style.marginBottom = '10px';
-    scoreDisplay.innerText = 'Score: 0';
+    scoreDisplay.className = 'score-display';
+    scoreDisplay.textContent = 'Score: 0';
 
-    container.appendChild(scoreDisplay);
-    container.appendChild(canvas);
+    container.append(scoreDisplay, canvas);
 
     const ctx = canvas.getContext('2d');
 
@@ -35,7 +32,6 @@ export function init(container) {
     // Game State
     let score = 0;
     let isGameOver = false;
-    let isGameWon = false;
     let animationId = null;
 
     // Paddle
@@ -72,9 +68,6 @@ export function init(container) {
     let rightPressed = false;
     let leftPressed = false;
 
-    document.addEventListener('keydown', keyDownHandler);
-    document.addEventListener('keyup', keyUpHandler);
-
     function keyDownHandler(e) {
         if (e.key === 'Right' || e.key === 'ArrowRight') rightPressed = true;
         else if (e.key === 'Left' || e.key === 'ArrowLeft') leftPressed = true;
@@ -84,6 +77,8 @@ export function init(container) {
         if (e.key === 'Right' || e.key === 'ArrowRight') rightPressed = false;
         else if (e.key === 'Left' || e.key === 'ArrowLeft') leftPressed = false;
     }
+    document.addEventListener('keydown', keyDownHandler);
+    document.addEventListener('keyup', keyUpHandler);
 
     function collisionDetection() {
         for (let c = 0; c < brickColumnCount; c++) {
@@ -94,11 +89,10 @@ export function init(container) {
                         dy = -dy;
                         b.status = 0;
                         score += 10;
-                        scoreDisplay.innerText = `Score: ${score}`;
+                        scoreDisplay.textContent = `Score: ${score}`;
                         playSound(400, 'sine', 0.1); // Brick break sound
-                        
+
                         if (score === brickRowCount * brickColumnCount * 10) {
-                            isGameWon = true;
                             winGame();
                         }
                     }
@@ -143,52 +137,101 @@ export function init(container) {
 
     function winGame() {
         isGameOver = true;
-        playSound(600, 'sine', 0.5);
-        alert('CONGRATULATIONS! YOU WIN!');
-        resetGame();
+        // Little victory arpeggio
+        playSound(523, 'sine', 0.15);
+        setTimeout(() => playSound(659, 'sine', 0.15), 150);
+        setTimeout(() => playSound(784, 'sine', 0.25), 300);
+        showGameOverModal('You Win!');
+    }
+
+    function setBlur(on) {
+        canvas.style.transition = on ? 'filter 0.3s ease' : 'none';
+        canvas.style.filter = on ? 'blur(3px)' : 'none';
     }
 
     function gameOver() {
         isGameOver = true;
         playSound(200, 'sawtooth', 0.5);
-        
-        const initials = prompt(`Game Over! Your score: ${score}\nEnter your initials (3 chars):`);
-        const finalInitials = initials ? initials.substring(0, 3).toUpperCase() : '???';
-        
-        saveHighScore(finalInitials, score);
-        showLeaderboard();
+        setBlur(true);
+        showGameOverModal('Game Over');
     }
 
-    function saveHighScore(initials, score) {
-        const scores = JSON.parse(localStorage.getItem('breakout_highscores') || '[]');
-        scores.push({ initials, score, date: new Date().toLocaleDateString() });
+    function getScores() {
+        return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+    }
+
+    function saveHighScore(initials, runScore) {
+        const scores = getScores();
+        scores.push({ initials, score: runScore, date: new Date().toLocaleDateString() });
         scores.sort((a, b) => b.score - a.score);
-        localStorage.setItem('breakout_highscores', JSON.stringify(scores.slice(0, 5)));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(scores.slice(0, 5)));
     }
 
-    function showLeaderboard() {
-        const scores = JSON.parse(localStorage.getItem('breakout_highscores') || '[]');
-        let leaderboardHtml = `<div style="background: rgba(0,0,0,0.8); padding: 20px; border-radius: 10px; color: white; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; border: 2px solid white;">
-            <h2>High Scores</h2>
-            <ul style="list-style: none; padding: 0; font-family: monospace; font-size: 1.2rem;">
-                ${scores.map((s, i) => `<li>${i+1}. ${s.initials} - ${s.score}</li>`).join('')}
-            </ul>
-            <button id="restart-breakout" style="margin-top: 10px; padding: 10px 20px; cursor: pointer;">Play Again</button>
-        </div>`;
-        
+    function escapeHtml(value) {
+        return String(value).replace(/[&<>"']/g, (ch) => (
+            { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]
+        ));
+    }
+
+    function renderLeaderboard() {
+        const scores = getScores();
+        if (scores.length === 0) {
+            return '<li class="empty">No scores yet — be the first!</li>';
+        }
+        return scores
+            .map((s, i) =>
+                `<li><span><span class="rank">${i + 1}.</span><span class="initials">${escapeHtml(s.initials)}</span></span><span class="entry-score">${s.score}</span></li>`
+            )
+            .join('');
+    }
+
+    function showGameOverModal(headline) {
         const overlay = document.createElement('div');
-        overlay.innerHTML = leaderboardHtml;
+        overlay.className = 'modal-overlay';
+        overlay.innerHTML = `
+            <div class="modal" role="dialog" aria-modal="true" aria-labelledby="breakout-modal-title">
+                <h2 id="breakout-modal-title">${headline}</h2>
+                <p class="final-score">Final score: <strong>${score}</strong></p>
+                <ol class="leaderboard" id="breakout-leaderboard" aria-live="polite">${renderLeaderboard()}</ol>
+                <form id="breakout-initials-form" class="initials-form" autocomplete="off">
+                    <label for="breakout-initials">Your Initials</label>
+                    <input id="breakout-initials" name="initials" maxlength="3" placeholder="ALX" spellcheck="false" autocomplete="off">
+                </form>
+                <div class="modal-actions">
+                    <button type="submit" form="breakout-initials-form" id="breakout-save" class="btn btn-primary">Save Score</button>
+                    <button type="button" id="breakout-again" class="btn btn-ghost">Play Again</button>
+                </div>
+            </div>`;
         container.appendChild(overlay);
-        
-        document.getElementById('restart-breakout').addEventListener('click', () => {
+
+        const form = overlay.querySelector('#breakout-initials-form');
+        const input = overlay.querySelector('#breakout-initials');
+        const saveBtn = overlay.querySelector('#breakout-save');
+        let saved = false;
+
+        form.addEventListener('submit', (e) => {
+            e.preventDefault();
+            if (saved) return;
+            saved = true;
+            const initials = (input.value.trim().toUpperCase() || '???').slice(0, 3);
+            saveHighScore(initials, score);
+            overlay.querySelector('#breakout-leaderboard').innerHTML = renderLeaderboard();
+            saveBtn.textContent = 'Saved ✓';
+            saveBtn.disabled = true;
+            input.disabled = true;
+        });
+
+        overlay.querySelector('#breakout-again').addEventListener('click', () => {
             overlay.remove();
             resetGame();
         });
+
+        input.focus();
     }
 
     function resetGame() {
         score = 0;
-        scoreDisplay.innerText = 'Score: 0';
+        scoreDisplay.textContent = 'Score: 0';
         x = canvas.width / 2;
         y = canvas.height - 30;
         dx = 2;
@@ -197,28 +240,30 @@ export function init(container) {
         rightPressed = false;
         leftPressed = false;
         isGameOver = false;
-        isGameWon = false;
-        
+        setBlur(false);
+
         // Reset bricks
         for (let c = 0; c < brickColumnCount; c++) {
             for (let r = 0; r < brickRowCount; r++) {
                 bricks[c][r].status = 1;
             }
         }
-        
+
         if (animationId) cancelAnimationFrame(animationId);
         animationId = requestAnimationFrame(draw);
     }
 
     function draw() {
         if (isGameOver) return;
-        
+
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        
+
         drawBricks();
         drawBall();
         drawPaddle();
         collisionDetection();
+
+        if (isGameOver) return; // Win/loss triggered during collision
 
         if (x + dx > canvas.width - ballRadius || x + dx < ballRadius) {
             dx = -dx;
@@ -231,6 +276,7 @@ export function init(container) {
                 playSound(500, 'sine', 0.1); // Paddle hit sound
             } else {
                 gameOver();
+                return;
             }
         }
 

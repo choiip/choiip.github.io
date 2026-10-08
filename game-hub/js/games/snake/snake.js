@@ -1,21 +1,18 @@
 export function init(container) {
+    const STORAGE_KEY = 'snake_highscores';
+
     // Create Game Canvas
     const canvas = document.createElement('canvas');
     canvas.width = 400;
     canvas.height = 400;
-    canvas.style.border = '5px solid #fff';
-    canvas.style.backgroundColor = '#000';
-    canvas.style.display = 'block';
+    canvas.className = 'game-canvas';
 
     // Create UI Elements
     const scoreDisplay = document.createElement('div');
-    scoreDisplay.id = 'snake-score';
-    scoreDisplay.style.fontSize = '24px';
-    scoreDisplay.style.marginBottom = '10px';
-    scoreDisplay.innerText = 'Score: 0';
+    scoreDisplay.className = 'score-display';
+    scoreDisplay.textContent = 'Score: 0';
 
-    container.appendChild(scoreDisplay);
-    container.appendChild(canvas);
+    container.append(scoreDisplay, canvas);
 
     const ctx = canvas.getContext('2d');
     const gridSize = 20;
@@ -57,34 +54,34 @@ export function init(container) {
         }
 
         const head = {x: snake[0].x + dx, y: snake[0].y + dy};
-        
+
         if (head.x < 0 || head.x >= tileCount || head.y < 0 || head.y >= tileCount) {
             gameOver();
             return;
         }
-        
+
         if (snake.some(segment => segment.x === head.x && segment.y === head.y)) {
             gameOver();
             return;
         }
-        
+
         snake.unshift(head);
-        
+
         if (head.x === food.x && head.y === food.y) {
             score += 10;
-            scoreDisplay.innerText = `Score: ${score}`;
+            scoreDisplay.textContent = `Score: ${score}`;
             playSound(600, 'sine', 0.1); // Eat sound
             generateFood();
         } else {
             snake.pop();
         }
-        
+
         ctx.fillStyle = 'black';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
-        
+
         ctx.fillStyle = 'lime';
         snake.forEach(segment => ctx.fillRect(segment.x * gridSize, segment.y * gridSize, gridSize - 2, gridSize - 2));
-        
+
         ctx.fillStyle = 'red';
         ctx.fillRect(food.x * gridSize, food.y * gridSize, gridSize - 2, gridSize - 2);
     }
@@ -99,76 +96,127 @@ export function init(container) {
         }
     }
 
+    function setBlur(on) {
+        canvas.style.transition = on ? 'filter 0.3s ease' : 'none';
+        canvas.style.filter = on ? 'blur(3px)' : 'none';
+    }
+
     function gameOver() {
         isGameOver = true;
         clearInterval(gameInterval);
-        
+
         playSound(200, 'sawtooth', 0.5); // Game over sound
-        
-        const initials = prompt(`Game Over! Your score: ${score}\nEnter your initials (3 chars):`);
-        const finalInitials = initials ? initials.substring(0, 3).toUpperCase() : '???';
-        
-        saveHighScore(finalInitials, score);
-        showLeaderboard();
+        setBlur(true);
+        showGameOverModal('Game Over');
     }
 
-    function saveHighScore(initials, score) {
-        const scores = JSON.parse(localStorage.getItem('snake_highscores') || '[]');
-        scores.push({ initials, score, date: new Date().toLocaleDateString() });
+    function getScores() {
+        return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+    }
+
+    function saveHighScore(initials, runScore) {
+        const scores = getScores();
+        scores.push({ initials, score: runScore, date: new Date().toLocaleDateString() });
         scores.sort((a, b) => b.score - a.score);
-        localStorage.setItem('snake_highscores', JSON.stringify(scores.slice(0, 5)));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(scores.slice(0, 5)));
     }
 
-    function showLeaderboard() {
-        const scores = JSON.parse(localStorage.getItem('snake_highscores') || '[]');
-        let leaderboardHtml = `<div style="background: rgba(0,0,0,0.8); padding: 20px; border-radius: 10px; color: white; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; border: 2px solid white;">
-            <h2>High Scores</h2>
-            <ul style="list-style: none; padding: 0; font-family: monospace; font-size: 1.2rem;">
-                ${scores.map((s, i) => `<li>${i+1}. ${s.initials} - ${s.score}</li>`).join('')}
-            </ul>
-            <button id="restart-snake" style="margin-top: 10px; padding: 10px 20px; cursor: pointer;">Play Again</button>
-        </div>`;
-        
+    function escapeHtml(value) {
+        return String(value).replace(/[&<>"']/g, (ch) => (
+            { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]
+        ));
+    }
+
+    function renderLeaderboard() {
+        const scores = getScores();
+        if (scores.length === 0) {
+            return '<li class="empty">No scores yet — be the first!</li>';
+        }
+        return scores
+            .map((s, i) =>
+                `<li><span><span class="rank">${i + 1}.</span><span class="initials">${escapeHtml(s.initials)}</span></span><span class="entry-score">${s.score}</span></li>`
+            )
+            .join('');
+    }
+
+    function showGameOverModal(headline) {
         const overlay = document.createElement('div');
-        overlay.innerHTML = leaderboardHtml;
+        overlay.className = 'modal-overlay';
+        overlay.innerHTML = `
+            <div class="modal" role="dialog" aria-modal="true" aria-labelledby="snake-modal-title">
+                <h2 id="snake-modal-title">${headline}</h2>
+                <p class="final-score">Final score: <strong>${score}</strong></p>
+                <ol class="leaderboard" id="snake-leaderboard" aria-live="polite">${renderLeaderboard()}</ol>
+                <form id="snake-initials-form" class="initials-form" autocomplete="off">
+                    <label for="snake-initials">Your Initials</label>
+                    <input id="snake-initials" name="initials" maxlength="3" placeholder="ALX" spellcheck="false" autocomplete="off">
+                </form>
+                <div class="modal-actions">
+                    <button type="submit" form="snake-initials-form" id="snake-save" class="btn btn-primary">Save Score</button>
+                    <button type="button" id="snake-again" class="btn btn-ghost">Play Again</button>
+                </div>
+            </div>`;
         container.appendChild(overlay);
-        
-        document.getElementById('restart-snake').addEventListener('click', () => {
+
+        const form = overlay.querySelector('#snake-initials-form');
+        const input = overlay.querySelector('#snake-initials');
+        const saveBtn = overlay.querySelector('#snake-save');
+        let saved = false;
+
+        form.addEventListener('submit', (e) => {
+            e.preventDefault();
+            if (saved) return;
+            saved = true;
+            const initials = (input.value.trim().toUpperCase() || '???').slice(0, 3);
+            saveHighScore(initials, score);
+            overlay.querySelector('#snake-leaderboard').innerHTML = renderLeaderboard();
+            saveBtn.textContent = 'Saved ✓';
+            saveBtn.disabled = true;
+            input.disabled = true;
+        });
+
+        overlay.querySelector('#snake-again').addEventListener('click', () => {
             overlay.remove();
             resetGame();
         });
+
+        input.focus();
     }
 
     function resetGame() {
         score = 0;
-        scoreDisplay.innerText = 'Score: 0';
-        
+        scoreDisplay.textContent = 'Score: 0';
+
         // Center the snake (tileCount / 2)
         const centerX = Math.floor(tileCount / 2);
         const centerY = Math.floor(tileCount / 2);
         snake = [{x: centerX, y: centerY}];
-        
+
         dx = 0; dy = 0;
         isGameOver = false;
+        setBlur(false);
         generateFood();
         if (gameInterval) clearInterval(gameInterval);
         gameInterval = setInterval(drawGame, 150);
     }
 
-    window.addEventListener('keydown', (e) => {
+    function keyDownHandler(e) {
+        if (isGameOver) return;
         switch(e.key) {
             case 'ArrowUp': if (dy !== 1) { dx = 0; dy = -1; } break;
             case 'ArrowDown': if (dy !== -1) { dx = 0; dy = 1; } break;
             case 'ArrowLeft': if (dx !== 1) { dx = -1; dy = 0; } break;
             case 'ArrowRight': if (dx !== -1) { dx = 1; dy = 0; } break;
         }
-    });
+    }
+    window.addEventListener('keydown', keyDownHandler);
 
     resetGame();
 
     return {
         destroy: () => {
             clearInterval(gameInterval);
+            window.removeEventListener('keydown', keyDownHandler);
         }
     };
 }

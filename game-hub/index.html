@@ -3,42 +3,75 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#0b0e1a">
     <title>Game Hub</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
+    <a class="skip-link" href="#game-grid">Skip to games</a>
     <div id="app">
-        <div id="hub-screen">
-            <h1>🎮 Game Hub</h1>
-            <div class="game-grid">
+        <section id="hub-screen" aria-label="Game selection">
+            <header class="hub-header">
+                <h1><span aria-hidden="true">🎮</span> Game Hub</h1>
+                <p class="tagline">Pick a game, beat your best, claim the leaderboard.</p>
+            </header>
+            <div class="game-grid" id="game-grid" tabindex="-1">
                 <div class="game-card" data-game="snake">
-                    <div class="game-icon">🐍</div>
-                    <h3>Snake</h3>
-                    <p>Classic snake game. Eat food to grow!</p>
-                    <button class="start-btn">Play Now</button>
+                    <button class="play-area" type="button" data-game="snake" aria-label="Play Snake">
+                        <span class="game-icon" aria-hidden="true">🐍</span>
+                        <span class="game-title">Snake</span>
+                        <span class="game-desc">Classic snake. Eat, grow, don’t crash.</span>
+                        <span class="start-btn">Play Now</span>
+                    </button>
+                    <button class="trophy-btn" type="button" data-trophy="snake" aria-label="Show Snake high scores" aria-haspopup="true">
+                        <span aria-hidden="true">🏆</span>
+                    </button>
                 </div>
                 <div class="game-card" data-game="tetris">
-                    <div class="game-icon">🧱</div>
-                    <h3>Tetris</h3>
-                    <p>Clear lines to score points!</p>
-                    <button class="start-btn">Play Now</button>
+                    <button class="play-area" type="button" data-game="tetris" aria-label="Play Tetris">
+                        <span class="game-icon" aria-hidden="true">🧱</span>
+                        <span class="game-title">Tetris</span>
+                        <span class="game-desc">Rotate, stack, clear lines.</span>
+                        <span class="start-btn">Play Now</span>
+                    </button>
+                    <button class="trophy-btn" type="button" data-trophy="tetris" aria-label="Show Tetris high scores" aria-haspopup="true">
+                        <span aria-hidden="true">🏆</span>
+                    </button>
                 </div>
                 <div class="game-card" data-game="breakout">
-                    <div class="game-icon">🎾</div>
-                    <h3>Breakout</h3>
-                    <p>Destroy all bricks to win!</p>
-                    <button class="start-btn">Play Now</button>
+                    <button class="play-area" type="button" data-game="breakout" aria-label="Play Breakout">
+                        <span class="game-icon" aria-hidden="true">🎾</span>
+                        <span class="game-title">Breakout</span>
+                        <span class="game-desc">Keep the ball alive, smash the wall.</span>
+                        <span class="start-btn">Play Now</span>
+                    </button>
+                    <button class="trophy-btn" type="button" data-trophy="breakout" aria-label="Show Breakout high scores" aria-haspopup="true">
+                        <span aria-hidden="true">🏆</span>
+                    </button>
                 </div>
             </div>
-        </div>
+        </section>
 
-        <div id="game-screen" class="hidden">
-            <button id="back-to-hub">⬅ Back to Hub</button>
+        <div id="game-screen" hidden>
+            <button id="back-to-hub" class="back-btn" type="button">
+                <span aria-hidden="true">←</span> Back to Hub
+            </button>
             <div id="game-container">
                 <!-- Game canvas and UI will be injected here -->
             </div>
         </div>
     </div>
+
+    <!-- Shared high-score popover for the trophy buttons -->
+    <div class="trophy-popover" id="trophy-popover" hidden>
+        <h3 class="trophy-popover-title">
+            <span class="trophy-popover-emoji" aria-hidden="true">🏆</span>
+            <span id="trophy-popover-name">High Scores</span>
+        </h3>
+        <ol class="leaderboard" id="trophy-popover-list"></ol>
+        <p class="trophy-popover-empty" id="trophy-popover-empty" hidden>No scores yet…</p>
+    </div>
+
     <script src="js/hub.js"></script>
 </body>
 </html>

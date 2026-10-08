@@ -10,7 +10,11 @@ export function init(container) {
     scoreDisplay.className = 'score-display';
     scoreDisplay.textContent = 'Score: 0';
 
-    container.append(scoreDisplay, canvas);
+    const touchHint = document.createElement('p');
+    touchHint.className = 'touch-hint';
+    touchHint.textContent = 'Tap to rotate · Drag to move or drop · Hold to fast-drop.';
+
+    container.append(scoreDisplay, canvas, touchHint);
 
     const ctx = canvas.getContext('2d');
     ctx.scale(20, 20);
@@ -40,6 +44,7 @@ export function init(container) {
     // Audio Context for sound effects
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     function playSound(freq, type, duration) {
+        if (audioCtx.state === 'suspended') audioCtx.resume();
         const osc = audioCtx.createOscillator();
         const gain = audioCtx.createGain();
         osc.type = type;
@@ -296,6 +301,123 @@ export function init(container) {
     }
     window.addEventListener('keydown', keyDownHandler);
 
+    // Touch controls: tap = rotate, drag = the piece follows the finger
+    // (1 cell of drag = exactly 1 cell of movement/drop), hold still = fast drop
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let touchStartTime = 0;
+    let lastTouchX = 0;
+    let lastTouchY = 0;
+    let isTouching = false;
+    let longPressTimer = null;
+    let softDropTimer = null;
+    let carryX = 0; // fractional drag not yet converted into a cell step
+    let carryY = 0;
+
+    function stopSoftDrop() {
+        if (softDropTimer) {
+            clearInterval(softDropTimer);
+            softDropTimer = null;
+        }
+    }
+
+    function clearLongPress() {
+        if (longPressTimer) {
+            clearTimeout(longPressTimer);
+            longPressTimer = null;
+        }
+    }
+
+    function touchStartHandler(e) {
+        if (isGameOver) return;
+        e.preventDefault();
+        const touch = e.touches[0];
+        touchStartX = lastTouchX = touch.clientX;
+        touchStartY = lastTouchY = touch.clientY;
+        touchStartTime = Date.now();
+        carryX = 0;
+        carryY = 0;
+        isTouching = true;
+        // Holding still = accelerate the piece
+        longPressTimer = setTimeout(() => {
+            if (!isTouching || isGameOver) return;
+            softDropTimer = setInterval(() => {
+                if (isGameOver) {
+                    stopSoftDrop();
+                    return;
+                }
+                playerDrop();
+            }, 80);
+        }, 280);
+    }
+
+    function touchMoveHandler(e) {
+        if (!isTouching || isGameOver) return;
+        e.preventDefault();
+        const touch = e.touches[0];
+        // Finger moved: this is a drag, not a hold
+        if (Math.abs(touch.clientX - touchStartX) > 10 || Math.abs(touch.clientY - touchStartY) > 10) {
+            clearLongPress();
+            stopSoftDrop();
+        }
+
+        // The piece follows the finger: 1 cell of drag = 1 cell of the game,
+        // with the fractional remainder carried over for precise control
+        const rect = canvas.getBoundingClientRect();
+        const cellW = rect.width / 12;
+        const cellH = rect.height / 20;
+        carryX += touch.clientX - lastTouchX;
+        carryY += touch.clientY - lastTouchY;
+        lastTouchX = touch.clientX;
+        lastTouchY = touch.clientY;
+
+        let steps = 0;
+        while (Math.abs(carryX) >= cellW - 0.5 && steps < 6) {
+            if (isGameOver) break;
+            playerMove(carryX > 0 ? 1 : -1);
+            carryX -= Math.sign(carryX) * cellW;
+            steps++;
+        }
+        steps = 0;
+        while (carryY >= cellH - 0.5 && steps < 6) {
+            if (isGameOver) break;
+            playerDrop();
+            carryY -= cellH;
+            steps++;
+        }
+    }
+
+    function touchEndHandler(e) {
+        if (!isTouching) return;
+        e.preventDefault();
+        isTouching = false;
+        clearLongPress();
+        stopSoftDrop();
+        if (isGameOver) return;
+
+        // Tap (no movement, quick) = rotate
+        const touch = e.changedTouches[0];
+        const absDx = Math.abs(touch.clientX - touchStartX);
+        const absDy = Math.abs(touch.clientY - touchStartY);
+        const duration = Date.now() - touchStartTime;
+        if (absDx < 12 && absDy < 12 && duration < 250) {
+            playerRotate();
+        }
+    }
+    canvas.addEventListener('touchstart', touchStartHandler, { passive: false });
+    canvas.addEventListener('touchmove', touchMoveHandler, { passive: false });
+    canvas.addEventListener('touchend', touchEndHandler, { passive: false });
+
+    // Block page scroll / pull-to-refresh while playing, even when the
+    // gesture starts off the canvas or the finger drifts past its edge
+    function pageTouchMoveHandler(e) {
+        if (isGameOver) return;
+        if (e.target instanceof Element && e.target.closest('#game-container')) {
+            e.preventDefault();
+        }
+    }
+    document.addEventListener('touchmove', pageTouchMoveHandler, { passive: false });
+
     function resetGame() {
         arena = Array.from({ length: 20 }, () => Array(12).fill(0));
         score = 0;
@@ -315,6 +437,12 @@ export function init(container) {
             destroyed = true;
             cancelAnimationFrame(rafId);
             window.removeEventListener('keydown', keyDownHandler);
+            clearLongPress();
+            stopSoftDrop();
+            canvas.removeEventListener('touchstart', touchStartHandler);
+            canvas.removeEventListener('touchmove', touchMoveHandler);
+            canvas.removeEventListener('touchend', touchEndHandler);
+            document.removeEventListener('touchmove', pageTouchMoveHandler);
         }
     };
 }

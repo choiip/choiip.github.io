@@ -24,11 +24,11 @@ html {
     background-color: var(--bg-base);
 }
 
-/* Suppress rubber-banding on precise pointers; keep native behavior on touch */
-@media (pointer: fine) {
-    html {
-        overscroll-behavior: none;
-    }
+/* Suppress rubber-banding / pull-to-refresh on all devices: the game screen
+   is a full-viewport play area, and down-swipes in Tetris/Snake must never
+   reload the page */
+html {
+    overscroll-behavior: none;
 }
 
 body {
@@ -347,6 +347,19 @@ body {
     font-size: 1.05rem;
 }
 
+/* Controls hint for touch devices (hidden on devices with a precise pointer) */
+.touch-hint {
+    margin: 0.9rem 0 0;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+@media (pointer: fine) {
+    .touch-hint {
+        display: none;
+    }
+}
+
 /* ============ Shared game UI ============ */
 .score-display {
     margin-bottom: 1rem;
@@ -357,10 +370,14 @@ body {
 
 .game-canvas {
     display: block;
+    max-width: 100%;
+    height: auto;
     background: #000;
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     box-shadow: 0 24px 70px -24px rgba(0, 0, 0, 0.9);
+    /* Let the game handle gestures; stop the browser from panning/zooming/refreshing */
+    touch-action: none;
 }
 
 /* ============ Game-over modal ============ */

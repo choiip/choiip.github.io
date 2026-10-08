@@ -12,7 +12,11 @@ export function init(container) {
     scoreDisplay.className = 'score-display';
     scoreDisplay.textContent = 'Score: 0';
 
-    container.append(scoreDisplay, canvas);
+    const touchHint = document.createElement('p');
+    touchHint.className = 'touch-hint';
+    touchHint.textContent = 'Swipe to steer the snake.';
+
+    container.append(scoreDisplay, canvas, touchHint);
 
     const ctx = canvas.getContext('2d');
     const gridSize = 20;
@@ -21,6 +25,7 @@ export function init(container) {
     // Audio Context for sound effects
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     function playSound(freq, type, duration) {
+        if (audioCtx.state === 'suspended') audioCtx.resume();
         const osc = audioCtx.createOscillator();
         const gain = audioCtx.createGain();
         osc.type = type;
@@ -200,16 +205,67 @@ export function init(container) {
         gameInterval = setInterval(drawGame, 150);
     }
 
-    function keyDownHandler(e) {
+    function setDirection(newDx, newDy) {
         if (isGameOver) return;
+        if (newDx === -1 && dx === 1) return; // no reversing
+        if (newDx === 1 && dx === -1) return;
+        if (newDy === -1 && dy === 1) return;
+        if (newDy === 1 && dy === -1) return;
+        dx = newDx;
+        dy = newDy;
+    }
+
+    function keyDownHandler(e) {
         switch(e.key) {
-            case 'ArrowUp': if (dy !== 1) { dx = 0; dy = -1; } break;
-            case 'ArrowDown': if (dy !== -1) { dx = 0; dy = 1; } break;
-            case 'ArrowLeft': if (dx !== 1) { dx = -1; dy = 0; } break;
-            case 'ArrowRight': if (dx !== -1) { dx = 1; dy = 0; } break;
+            case 'ArrowUp': setDirection(0, -1); break;
+            case 'ArrowDown': setDirection(0, 1); break;
+            case 'ArrowLeft': setDirection(-1, 0); break;
+            case 'ArrowRight': setDirection(1, 0); break;
         }
     }
     window.addEventListener('keydown', keyDownHandler);
+
+    // Touch controls: swipe in the new direction
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let touchActive = false;
+
+    function touchStartHandler(e) {
+        e.preventDefault();
+        const touch = e.touches[0];
+        touchStartX = touch.clientX;
+        touchStartY = touch.clientY;
+        touchActive = true;
+    }
+
+    function touchEndHandler(e) {
+        e.preventDefault();
+        if (!touchActive) return;
+        touchActive = false;
+        const touch = e.changedTouches[0];
+        const swipeDx = touch.clientX - touchStartX;
+        const swipeDy = touch.clientY - touchStartY;
+        const absDx = Math.abs(swipeDx);
+        const absDy = Math.abs(swipeDy);
+        if (Math.max(absDx, absDy) < 24) return; // it was a tap, not a swipe
+        if (absDx > absDy) {
+            setDirection(swipeDx > 0 ? 1 : -1, 0);
+        } else {
+            setDirection(0, swipeDy > 0 ? 1 : -1);
+        }
+    }
+    canvas.addEventListener('touchstart', touchStartHandler, { passive: false });
+    canvas.addEventListener('touchend', touchEndHandler, { passive: false });
+
+    // Block page scroll / pull-to-refresh while playing, even when the
+    // gesture starts off the canvas or the finger drifts past its edge
+    function pageTouchMoveHandler(e) {
+        if (isGameOver) return;
+        if (e.target instanceof Element && e.target.closest('#game-container')) {
+            e.preventDefault();
+        }
+    }
+    document.addEventListener('touchmove', pageTouchMoveHandler, { passive: false });
 
     resetGame();
 
@@ -217,6 +273,9 @@ export function init(container) {
         destroy: () => {
             clearInterval(gameInterval);
             window.removeEventListener('keydown', keyDownHandler);
+            canvas.removeEventListener('touchstart', touchStartHandler);
+            canvas.removeEventListener('touchend', touchEndHandler);
+            document.removeEventListener('touchmove', pageTouchMoveHandler);
         }
     };
 }

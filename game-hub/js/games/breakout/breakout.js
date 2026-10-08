@@ -10,13 +10,18 @@ export function init(container) {
     scoreDisplay.className = 'score-display';
     scoreDisplay.textContent = 'Score: 0';
 
-    container.append(scoreDisplay, canvas);
+    const touchHint = document.createElement('p');
+    touchHint.className = 'touch-hint';
+    touchHint.textContent = 'Drag across the court to move the paddle.';
+
+    container.append(scoreDisplay, canvas, touchHint);
 
     const ctx = canvas.getContext('2d');
 
     // Audio Context for sound effects
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     function playSound(freq, type, duration) {
+        if (audioCtx.state === 'suspended') audioCtx.resume();
         const osc = audioCtx.createOscillator();
         const gain = audioCtx.createGain();
         osc.type = type;
@@ -79,6 +84,30 @@ export function init(container) {
     }
     document.addEventListener('keydown', keyDownHandler);
     document.addEventListener('keyup', keyUpHandler);
+
+    // Touch controls: paddle follows the finger horizontally
+    function updatePaddleFromTouch(e) {
+        if (isGameOver) return;
+        const touch = e.touches[0];
+        if (!touch) return;
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width; // canvas may be scaled down on small screens
+        const x = (touch.clientX - rect.left) * scaleX;
+        paddleX = x - paddleWidth / 2;
+        paddleX = Math.max(0, Math.min(paddleX, canvas.width - paddleWidth));
+    }
+
+    function touchStartHandler(e) {
+        e.preventDefault();
+        updatePaddleFromTouch(e);
+    }
+
+    function touchMoveHandler(e) {
+        e.preventDefault();
+        updatePaddleFromTouch(e);
+    }
+    canvas.addEventListener('touchstart', touchStartHandler, { passive: false });
+    canvas.addEventListener('touchmove', touchMoveHandler, { passive: false });
 
     function collisionDetection() {
         for (let c = 0; c < brickColumnCount; c++) {
@@ -299,6 +328,8 @@ export function init(container) {
             cancelAnimationFrame(animationId);
             document.removeEventListener('keydown', keyDownHandler);
             document.removeEventListener('keyup', keyUpHandler);
+            canvas.removeEventListener('touchstart', touchStartHandler);
+            canvas.removeEventListener('touchmove', touchMoveHandler);
         }
     };
 }

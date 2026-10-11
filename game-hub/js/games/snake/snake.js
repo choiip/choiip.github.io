@@ -38,25 +38,28 @@ export function init(container) {
         osc.stop(audioCtx.currentTime + duration);
     }
 
+    const TICK_MS = 150;
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
     let score = 0;
     let dx = 0, dy = 0;
     let snake = [];
+    let prevSnake = [];
     let food = {x: 5, y: 5};
     let gameInterval = null;
+    let rafId = null;
+    let particles = [];
+    let eatTime = -Infinity;
+    let lastTickTime = performance.now();
+    let lastRenderTime = performance.now();
     let isGameOver = false;
+    let destroyed = false;
 
-    function drawGame() {
-        if (isGameOver) return;
+    // ---------------- Game logic (fixed timestep) ----------------
 
-        if (dx === 0 && dy === 0) {
-            ctx.fillStyle = 'black';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.fillStyle = 'lime';
-            snake.forEach(segment => ctx.fillRect(segment.x * gridSize, segment.y * gridSize, gridSize - 2, gridSize - 2));
-            ctx.fillStyle = 'red';
-            ctx.fillRect(food.x * gridSize, food.y * gridSize, gridSize - 2, gridSize - 2);
-            return;
-        }
+    function tick() {
+        if (isGameOver || destroyed) return;
+        if (dx === 0 && dy === 0) return; // idle: waiting for the first swipe/key
 
         const head = {x: snake[0].x + dx, y: snake[0].y + dy};
 
@@ -70,25 +73,207 @@ export function init(container) {
             return;
         }
 
+        prevSnake = snake.map((s) => ({ ...s }));
         snake.unshift(head);
+        lastTickTime = performance.now();
 
         if (head.x === food.x && head.y === food.y) {
             score += 10;
             scoreDisplay.textContent = `Score: ${score}`;
             playSound(600, 'sine', 0.1); // Eat sound
+            eatTime = performance.now();
+            spawnEatParticles((food.x + 0.5) * gridSize, (food.y + 0.5) * gridSize);
             generateFood();
         } else {
             snake.pop();
         }
+    }
 
-        ctx.fillStyle = 'black';
+    // ---------------- Rendering (smooth 60fps on top of the fixed timestep) ----------------
+
+    function drawBackground() {
+        ctx.fillStyle = '#0b120a';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
+        // Subtle checkerboard so the grid reads without dominating
+        ctx.fillStyle = 'rgba(134, 239, 172, 0.035)';
+        for (let y = 0; y < tileCount; y++) {
+            for (let x = 0; x < tileCount; x++) {
+                if ((x + y) % 2 === 0) {
+                    ctx.fillRect(x * gridSize, y * gridSize, gridSize, gridSize);
+                }
+            }
+        }
+    }
 
-        ctx.fillStyle = 'lime';
-        snake.forEach(segment => ctx.fillRect(segment.x * gridSize, segment.y * gridSize, gridSize - 2, gridSize - 2));
+    function drawApple(now) {
+        const pulse = reducedMotion ? 1 : 1 + 0.06 * Math.sin(now / 170);
+        const cx = (food.x + 0.5) * gridSize;
+        const cy = (food.y + 0.5) * gridSize;
+        const r = gridSize * 0.4 * pulse;
 
-        ctx.fillStyle = 'red';
-        ctx.fillRect(food.x * gridSize, food.y * gridSize, gridSize - 2, gridSize - 2);
+        // Body with a soft 3D gradient
+        const grad = ctx.createRadialGradient(cx - r * 0.35, cy - r * 0.4, r * 0.15, cx, cy, r * 1.1);
+        grad.addColorStop(0, '#f87171');
+        grad.addColorStop(1, '#dc2626');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(cx, cy + r * 0.08, r, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Stem
+        ctx.strokeStyle = '#854d0e';
+        ctx.lineWidth = 2.5;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(cx, cy - r * 0.85);
+        ctx.quadraticCurveTo(cx + 1.5, cy - r * 0.85 - 3, cx + 3.5, cy - r * 0.85 - 5);
+        ctx.stroke();
+
+        // Leaf
+        ctx.fillStyle = '#22c55e';
+        ctx.save();
+        ctx.translate(cx + 5, cy - r * 0.85 - 2.5);
+        ctx.rotate(-0.45);
+        ctx.beginPath();
+        ctx.ellipse(0, 0, 4.5, 2.2, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        // Glossy highlight
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+        ctx.beginPath();
+        ctx.arc(cx - r * 0.35, cy - r * 0.25, r * 0.18, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    function bodyColor(f) {
+        // Bright green near the head -> deep green at the tail
+        const r = Math.round(34 + (21 - 34) * f);
+        const g = Math.round(197 + (128 - 197) * f);
+        const b = Math.round(94 + (61 - 94) * f);
+        return `rgb(${r}, ${g}, ${b})`;
+    }
+
+    function segmentWidth(i, n) {
+        const f = n <= 1 ? 0 : i / (n - 1);
+        return gridSize * (0.78 - 0.26 * f); // Tapers toward the tail
+    }
+
+    function roundRectPath(c, x, y, w, h, r) {
+        c.beginPath();
+        c.moveTo(x + r, y);
+        c.arcTo(x + w, y, x + w, y + h, r);
+        c.arcTo(x + w, y + h, x, y + h, r);
+        c.arcTo(x, y + h, x, y, r);
+        c.arcTo(x, y, x + w, y, r);
+        c.closePath();
+    }
+
+    function drawSnake(now, t) {
+        // Interpolate each segment between its previous and current cell
+        const centers = snake.map((seg, i) => {
+            const prev = prevSnake[Math.min(i, prevSnake.length - 1)] || seg;
+            return {
+                x: (prev.x + (seg.x - prev.x) * t + 0.5) * gridSize,
+                y: (prev.y + (seg.y - prev.y) * t + 0.5) * gridSize
+            };
+        });
+        const n = centers.length;
+
+        // Body, tail -> head, so the wider head-side parts paint on top
+        for (let i = n - 1; i >= 1; i--) {
+            ctx.strokeStyle = bodyColor(i / (n - 1));
+            ctx.lineWidth = segmentWidth(i, n);
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(centers[i].x, centers[i].y);
+            ctx.lineTo(centers[i - 1].x, centers[i - 1].y);
+            ctx.stroke();
+        }
+
+        // Head, with a short "pop" when eating
+        const pop = reducedMotion ? 1 : 1 + 0.22 * Math.max(0, 1 - (now - eatTime) / 180);
+        const hw = gridSize * 0.95 * pop;
+        const hx = centers[0].x;
+        const hy = centers[0].y;
+        const dir = (dx === 0 && dy === 0) ? { x: 0, y: -1 } : { x: dx, y: dy };
+
+        roundRectPath(ctx, hx - hw / 2, hy - hw / 2, hw, hw, 6);
+        ctx.fillStyle = '#4ade80';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        // Eyes face the direction of travel (look up while idle)
+        const perp = { x: -dir.y, y: dir.x };
+        const forward = gridSize * 0.17 * pop;
+        const side = gridSize * 0.21 * pop;
+        for (const s of [1, -1]) {
+            const ex = hx + dir.x * forward + perp.x * side * s;
+            const ey = hy + dir.y * forward + perp.y * side * s;
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(ex, ey, gridSize * 0.13 * pop, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#0f172a';
+            ctx.beginPath();
+            ctx.arc(ex + dir.x * 1.8, ey + dir.y * 1.8, gridSize * 0.065 * pop, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+
+    function spawnEatParticles(cx, cy) {
+        if (reducedMotion) return;
+        const colors = ['#f87171', '#ef4444', '#bbf7d0', '#22c55e'];
+        for (let i = 0; i < 14; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const speed = 40 + Math.random() * 90;
+            particles.push({
+                x: cx,
+                y: cy,
+                vx: Math.cos(angle) * speed,
+                vy: Math.sin(angle) * speed - 30,
+                size: 1.5 + Math.random() * 2.5,
+                life: 1,
+                decay: 1.6 + Math.random() * 1.2,
+                color: colors[Math.floor(Math.random() * colors.length)]
+            });
+        }
+    }
+
+    function updateAndDrawParticles(dt) {
+        for (let i = particles.length - 1; i >= 0; i--) {
+            const p = particles[i];
+            p.life -= p.decay * dt;
+            if (p.life <= 0) {
+                particles.splice(i, 1);
+                continue;
+            }
+            p.x += p.vx * dt;
+            p.y += p.vy * dt;
+            p.vy += 160 * dt; // A little gravity
+            ctx.globalAlpha = Math.max(0, p.life);
+            ctx.fillStyle = p.color;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+    }
+
+    function render(now = performance.now()) {
+        if (destroyed) return;
+        const dt = Math.min(0.05, (now - lastRenderTime) / 1000);
+        lastRenderTime = now;
+
+        drawBackground();
+        drawApple(now);
+        const t = isGameOver ? 1 : Math.min(1, (now - lastTickTime) / TICK_MS);
+        drawSnake(now, t);
+        updateAndDrawParticles(dt);
+
+        rafId = requestAnimationFrame(render);
     }
 
     function generateFood() {
@@ -199,10 +384,17 @@ export function init(container) {
 
         dx = 0; dy = 0;
         isGameOver = false;
+        prevSnake = snake.map((s) => ({ ...s }));
+        particles = [];
+        eatTime = -Infinity;
+        lastTickTime = performance.now();
+        lastRenderTime = performance.now();
         setBlur(false);
         generateFood();
         if (gameInterval) clearInterval(gameInterval);
-        gameInterval = setInterval(drawGame, 150);
+        gameInterval = setInterval(tick, TICK_MS);
+        cancelAnimationFrame(rafId);
+        rafId = requestAnimationFrame(render);
     }
 
     function setDirection(newDx, newDy) {
@@ -271,7 +463,9 @@ export function init(container) {
 
     return {
         destroy: () => {
+            destroyed = true;
             clearInterval(gameInterval);
+            cancelAnimationFrame(rafId);
             window.removeEventListener('keydown', keyDownHandler);
             canvas.removeEventListener('touchstart', touchStartHandler);
             canvas.removeEventListener('touchend', touchEndHandler);

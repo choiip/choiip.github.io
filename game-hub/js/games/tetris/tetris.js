@@ -233,6 +233,8 @@ export function init(container) {
         // Bottom-up so earlier splices don't shift later indices
         for (let i = rows.length - 1; i >= 0; i--) {
             arena.splice(rows[i], 1);
+        }
+        while (arena.length < ROWS) {
             arena.unshift(Array(COLS).fill(0));
         }
     }

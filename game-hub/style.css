@@ -261,6 +261,11 @@ body {
     --card-accent-glow: rgba(250, 204, 21, 0.35);
 }
 
+.game-card[data-game='racer'] {
+    --card-accent: #f472b6;
+    --card-accent-glow: rgba(244, 114, 182, 0.35);
+}
+
 .game-icon {
     display: grid;
     place-items: center;

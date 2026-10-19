@@ -271,6 +271,11 @@ body {
     --card-accent-glow: rgba(245, 181, 6, 0.35);
 }
 
+.game-card[data-game='neural-strike'] {
+    --card-accent: #c084fc;
+    --card-accent-glow: rgba(192, 132, 252, 0.35);
+}
+
 .game-icon {
     display: grid;
     place-items: center;

@@ -1766,23 +1766,23 @@ export function init(container) {
             g.restore();
         }
 
-        // combo
+        // combo — top-left under the score, keeping the track unobstructed
         if (combo >= 2) {
             const pop = 1 + 0.3 * comboPop;
             const hot = combo >= 16;
             g.save();
-            g.translate(W / 2, 320);
+            g.translate(14, 82);
             g.scale(pop, pop);
-            g.textAlign = 'center';
-            g.font = '800 40px system-ui, sans-serif';
-            g.lineWidth = 6;
+            g.textAlign = 'left';
+            g.font = '800 30px system-ui, sans-serif';
+            g.lineWidth = 5;
             g.strokeStyle = 'rgba(4, 5, 12, 0.85)';
             g.strokeText(String(combo), 0, 0);
             g.fillStyle = hot ? '#a3e635' : '#f4f6fb';
             g.fillText(String(combo), 0, 0);
-            g.font = '700 11px system-ui, sans-serif';
+            g.font = '700 10px system-ui, sans-serif';
             g.fillStyle = 'rgba(233, 213, 255, 0.75)';
-            g.fillText('C O M B O', 0, 18);
+            g.fillText('C O M B O', 1, 15);
             g.restore();
         }
     }

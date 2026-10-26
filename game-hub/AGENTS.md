@@ -67,8 +67,11 @@ export function init(container) {
   the top 5. `hub.js` reads the same key for the trophy popover.
 - **Game over modal**: build an overlay div (`modal-overlay` / `modal`,
   `role="dialog"`), show final score, render the leaderboard via
-  `escapeHtml`, collect 0–3 uppercase initials (default `'???'`), save once,
-  then offer Play Again.
+  `escapeHtml`, then offer Play Again and a Home button. Home dispatches a
+  `hub:home` window event that `hub.js` catches to return to the lobby.
+  Collect 1–3 capital-letter initials (default `'???'`), save once — only
+  when the final score is > 0; a zero score skips the record entry entirely
+  (form and Save button are removed, focus goes to Play Again).
 - **Loop shape**: fixed-timestep logic via `setInterval(tick, TICK_MS)`, fluid
   rendering via `requestAnimationFrame` interpolating between ticks. Cancel
   and re-create both on reset; never start a second one.

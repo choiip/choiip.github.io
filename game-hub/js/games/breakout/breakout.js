@@ -525,18 +525,20 @@ export function init(container) {
     function showGameOverModal(headline) {
         const overlay = document.createElement('div');
         overlay.className = 'modal-overlay';
+        const finalScore = score;
         overlay.innerHTML = `
             <div class="modal" role="dialog" aria-modal="true" aria-labelledby="breakout-modal-title">
                 <h2 id="breakout-modal-title">${headline}</h2>
-                <p class="final-score">Final score: <strong>${score}</strong></p>
+                <p class="final-score">Final score: <strong>${finalScore}</strong></p>
                 <ol class="leaderboard" id="breakout-leaderboard" aria-live="polite">${renderLeaderboard()}</ol>
                 <form id="breakout-initials-form" class="initials-form" autocomplete="off">
                     <label for="breakout-initials">Your Initials</label>
-                    <input id="breakout-initials" name="initials" maxlength="3" placeholder="ALX" spellcheck="false" autocomplete="off">
+                    <input id="breakout-initials" name="initials" maxlength="3" placeholder="ALX" spellcheck="false" autocomplete="off" autocapitalize="characters">
                 </form>
                 <div class="modal-actions">
                     <button type="submit" form="breakout-initials-form" id="breakout-save" class="btn btn-primary">Save Score</button>
                     <button type="button" id="breakout-again" class="btn btn-ghost">Play Again</button>
+                    <button type="button" id="breakout-home" class="btn btn-ghost">Home</button>
                 </div>
             </div>`;
         container.appendChild(overlay);
@@ -544,26 +546,43 @@ export function init(container) {
         const form = overlay.querySelector('#breakout-initials-form');
         const input = overlay.querySelector('#breakout-initials');
         const saveBtn = overlay.querySelector('#breakout-save');
+        const againBtn = overlay.querySelector('#breakout-again');
         let saved = false;
 
-        form.addEventListener('submit', (e) => {
-            e.preventDefault();
-            if (saved) return;
-            saved = true;
-            const initials = (input.value.trim().toUpperCase() || '???').slice(0, 3);
-            saveHighScore(initials, score);
-            overlay.querySelector('#breakout-leaderboard').innerHTML = renderLeaderboard();
-            saveBtn.textContent = 'Saved ✓';
-            saveBtn.disabled = true;
-            input.disabled = true;
+        // Restrict initials to 1–3 capital letters
+        input.addEventListener('input', () => {
+            const cleaned = input.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3);
+            if (cleaned !== input.value) input.value = cleaned;
         });
 
-        overlay.querySelector('#breakout-again').addEventListener('click', () => {
+        if (finalScore > 0) {
+            form.addEventListener('submit', (e) => {
+                e.preventDefault();
+                if (saved) return;
+                saved = true;
+                const initials = (input.value.trim().toUpperCase() || '???').slice(0, 3);
+                saveHighScore(initials, finalScore);
+                overlay.querySelector('#breakout-leaderboard').innerHTML = renderLeaderboard();
+                saveBtn.textContent = 'Saved ✓';
+                saveBtn.disabled = true;
+                input.disabled = true;
+            });
+            input.focus();
+        } else {
+            // Zero score: skip the record entry
+            form.remove();
+            saveBtn.remove();
+            againBtn.focus();
+        }
+
+        againBtn.addEventListener('click', () => {
             overlay.remove();
             resetGame();
         });
 
-        input.focus();
+        overlay.querySelector('#breakout-home').addEventListener('click', () => {
+            window.dispatchEvent(new CustomEvent('hub:home'));
+        });
     }
 
     function resetGame() {

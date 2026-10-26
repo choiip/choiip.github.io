@@ -1162,19 +1162,21 @@ export function init(container) {
     function showGameOverModal() {
         const overlay = document.createElement('div');
         overlay.className = 'modal-overlay';
+        const finalScore = scoreShown;
         overlay.innerHTML = `
             <div class="modal" role="dialog" aria-modal="true" aria-labelledby="gf-modal-title">
                 <h2 id="gf-modal-title">The Shaft Claims You</h2>
-                <p class="final-score">Score: <strong>${scoreShown}</strong></p>
+                <p class="final-score">Score: <strong>${finalScore}</strong></p>
                 <p class="final-detail">Depth ${Math.floor((bestS - startS) / 10)} m · glass bonus +${bonus}</p>
                 <ol class="leaderboard" id="gf-leaderboard" aria-live="polite">${renderLeaderboard()}</ol>
                 <form id="gf-initials-form" class="initials-form" autocomplete="off">
                     <label for="gf-initials">Your Initials</label>
-                    <input id="gf-initials" name="initials" maxlength="3" placeholder="ALX" spellcheck="false" autocomplete="off">
+                    <input id="gf-initials" name="initials" maxlength="3" placeholder="ALX" spellcheck="false" autocomplete="off" autocapitalize="characters">
                 </form>
                 <div class="modal-actions">
                     <button type="submit" form="gf-initials-form" id="gf-save" class="btn btn-primary">Save Score</button>
                     <button type="button" id="gf-again" class="btn btn-ghost">Play Again</button>
+                    <button type="button" id="gf-home" class="btn btn-ghost">Home</button>
                 </div>
             </div>`;
         container.appendChild(overlay);
@@ -1183,27 +1185,44 @@ export function init(container) {
         const form = overlay.querySelector('#gf-initials-form');
         const input = overlay.querySelector('#gf-initials');
         const saveBtn = overlay.querySelector('#gf-save');
+        const againBtn = overlay.querySelector('#gf-again');
         let saved = false;
 
-        form.addEventListener('submit', (e) => {
-            e.preventDefault();
-            if (saved) return;
-            saved = true;
-            const initials = (input.value.trim().toUpperCase() || '???').slice(0, 3);
-            saveHighScore(initials, scoreShown);
-            overlay.querySelector('#gf-leaderboard').innerHTML = renderLeaderboard();
-            saveBtn.textContent = 'Saved ✓';
-            saveBtn.disabled = true;
-            input.disabled = true;
+        // Restrict initials to 1–3 capital letters
+        input.addEventListener('input', () => {
+            const cleaned = input.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3);
+            if (cleaned !== input.value) input.value = cleaned;
         });
 
-        overlay.querySelector('#gf-again').addEventListener('click', () => {
+        if (finalScore > 0) {
+            form.addEventListener('submit', (e) => {
+                e.preventDefault();
+                if (saved) return;
+                saved = true;
+                const initials = (input.value.trim().toUpperCase() || '???').slice(0, 3);
+                saveHighScore(initials, finalScore);
+                overlay.querySelector('#gf-leaderboard').innerHTML = renderLeaderboard();
+                saveBtn.textContent = 'Saved ✓';
+                saveBtn.disabled = true;
+                input.disabled = true;
+            });
+            input.focus();
+        } else {
+            // Zero score: skip the record entry
+            form.remove();
+            saveBtn.remove();
+            againBtn.focus();
+        }
+
+        againBtn.addEventListener('click', () => {
             overlay.remove();
             modalOverlay = null;
             resetGame();
         });
 
-        input.focus();
+        overlay.querySelector('#gf-home').addEventListener('click', () => {
+            window.dispatchEvent(new CustomEvent('hub:home'));
+        });
     }
 
     // ---- Input ----

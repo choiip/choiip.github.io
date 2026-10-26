@@ -332,18 +332,20 @@ export function init(container) {
     function showGameOverModal(headline) {
         const overlay = document.createElement('div');
         overlay.className = 'modal-overlay';
+        const finalScore = score;
         overlay.innerHTML = `
             <div class="modal" role="dialog" aria-modal="true" aria-labelledby="snake-modal-title">
                 <h2 id="snake-modal-title">${headline}</h2>
-                <p class="final-score">Final score: <strong>${score}</strong></p>
+                <p class="final-score">Final score: <strong>${finalScore}</strong></p>
                 <ol class="leaderboard" id="snake-leaderboard" aria-live="polite">${renderLeaderboard()}</ol>
                 <form id="snake-initials-form" class="initials-form" autocomplete="off">
                     <label for="snake-initials">Your Initials</label>
-                    <input id="snake-initials" name="initials" maxlength="3" placeholder="ALX" spellcheck="false" autocomplete="off">
+                    <input id="snake-initials" name="initials" maxlength="3" placeholder="ALX" spellcheck="false" autocomplete="off" autocapitalize="characters">
                 </form>
                 <div class="modal-actions">
                     <button type="submit" form="snake-initials-form" id="snake-save" class="btn btn-primary">Save Score</button>
                     <button type="button" id="snake-again" class="btn btn-ghost">Play Again</button>
+                    <button type="button" id="snake-home" class="btn btn-ghost">Home</button>
                 </div>
             </div>`;
         container.appendChild(overlay);
@@ -351,26 +353,43 @@ export function init(container) {
         const form = overlay.querySelector('#snake-initials-form');
         const input = overlay.querySelector('#snake-initials');
         const saveBtn = overlay.querySelector('#snake-save');
+        const againBtn = overlay.querySelector('#snake-again');
         let saved = false;
 
-        form.addEventListener('submit', (e) => {
-            e.preventDefault();
-            if (saved) return;
-            saved = true;
-            const initials = (input.value.trim().toUpperCase() || '???').slice(0, 3);
-            saveHighScore(initials, score);
-            overlay.querySelector('#snake-leaderboard').innerHTML = renderLeaderboard();
-            saveBtn.textContent = 'Saved ✓';
-            saveBtn.disabled = true;
-            input.disabled = true;
+        // Restrict initials to 1–3 capital letters
+        input.addEventListener('input', () => {
+            const cleaned = input.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3);
+            if (cleaned !== input.value) input.value = cleaned;
         });
 
-        overlay.querySelector('#snake-again').addEventListener('click', () => {
+        if (finalScore > 0) {
+            form.addEventListener('submit', (e) => {
+                e.preventDefault();
+                if (saved) return;
+                saved = true;
+                const initials = (input.value.trim().toUpperCase() || '???').slice(0, 3);
+                saveHighScore(initials, finalScore);
+                overlay.querySelector('#snake-leaderboard').innerHTML = renderLeaderboard();
+                saveBtn.textContent = 'Saved ✓';
+                saveBtn.disabled = true;
+                input.disabled = true;
+            });
+            input.focus();
+        } else {
+            // Zero score: skip the record entry
+            form.remove();
+            saveBtn.remove();
+            againBtn.focus();
+        }
+
+        againBtn.addEventListener('click', () => {
             overlay.remove();
             resetGame();
         });
 
-        input.focus();
+        overlay.querySelector('#snake-home').addEventListener('click', () => {
+            window.dispatchEvent(new CustomEvent('hub:home'));
+        });
     }
 
     function resetGame() {

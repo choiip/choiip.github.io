@@ -578,42 +578,60 @@ export function init(container) {
         overlayOpen = true;
         const overlay = document.createElement('div');
         overlay.className = 'modal-overlay';
+        const finalScore = Math.floor(score);
         overlay.innerHTML = `
             <div class="modal" role="dialog" aria-modal="true" aria-labelledby="pb-modal-title">
                 <h2 id="pb-modal-title">${headline}</h2>
-                <p class="final-score">Final score: <strong>${Math.floor(score)}</strong></p>
+                <p class="final-score">Final score: <strong>${finalScore}</strong></p>
                 <ol class="leaderboard" id="pb-leaderboard" aria-live="polite">${renderLeaderboard()}</ol>
                 <form id="pb-initials-form" class="initials-form" autocomplete="off">
                     <label for="pb-initials">Your Initials</label>
-                    <input id="pb-initials" name="initials" maxlength="3" placeholder="ALX" spellcheck="false" autocomplete="off">
+                    <input id="pb-initials" name="initials" maxlength="3" placeholder="ALX" spellcheck="false" autocomplete="off" autocapitalize="characters">
                 </form>
                 <div class="modal-actions">
                     <button type="submit" form="pb-initials-form" id="pb-save" class="btn btn-primary">Save Score</button>
                     <button type="button" id="pb-again" class="btn btn-ghost">Play Again</button>
+                    <button type="button" id="pb-home" class="btn btn-ghost">Home</button>
                 </div>
             </div>`;
         container.appendChild(overlay);
         const form = overlay.querySelector('#pb-initials-form');
         const inp = overlay.querySelector('#pb-initials');
         const saveBtn = overlay.querySelector('#pb-save');
+        const againBtn = overlay.querySelector('#pb-again');
         let saved = false;
-        form.addEventListener('submit', (e) => {
-            e.preventDefault();
-            if (saved) return;
-            saved = true;
-            const initials = (inp.value.trim().toUpperCase() || '???').slice(0, 3);
-            saveHighScore(initials, Math.floor(score));
-            overlay.querySelector('#pb-leaderboard').innerHTML = renderLeaderboard();
-            saveBtn.textContent = 'Saved ✓';
-            saveBtn.disabled = true;
-            inp.disabled = true;
+        // Restrict initials to 1–3 capital letters
+        inp.addEventListener('input', () => {
+            const cleaned = inp.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3);
+            if (cleaned !== inp.value) inp.value = cleaned;
         });
-        overlay.querySelector('#pb-again').addEventListener('click', () => {
+        if (finalScore > 0) {
+            form.addEventListener('submit', (e) => {
+                e.preventDefault();
+                if (saved) return;
+                saved = true;
+                const initials = (inp.value.trim().toUpperCase() || '???').slice(0, 3);
+                saveHighScore(initials, finalScore);
+                overlay.querySelector('#pb-leaderboard').innerHTML = renderLeaderboard();
+                saveBtn.textContent = 'Saved ✓';
+                saveBtn.disabled = true;
+                inp.disabled = true;
+            });
+            inp.focus();
+        } else {
+            // Zero score: skip the record entry
+            form.remove();
+            saveBtn.remove();
+            againBtn.focus();
+        }
+        againBtn.addEventListener('click', () => {
             overlay.remove();
             overlayOpen = false;
             resetRun();
         });
-        inp.focus();
+        overlay.querySelector('#pb-home').addEventListener('click', () => {
+            window.dispatchEvent(new CustomEvent('hub:home'));
+        });
     }
 
     // ============================================================

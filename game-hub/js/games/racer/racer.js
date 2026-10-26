@@ -483,18 +483,20 @@ export function init(container) {
         overlayOpen = true;
         const overlay = document.createElement('div');
         overlay.className = 'modal-overlay';
+        const finalScore = Math.floor(score);
         overlay.innerHTML = `
             <div class="modal" role="dialog" aria-modal="true" aria-labelledby="racer-modal-title">
                 <h2 id="racer-modal-title">${headline}</h2>
-                <p class="final-score">Final score: <strong>${Math.floor(score)}</strong></p>
+                <p class="final-score">Final score: <strong>${finalScore}</strong></p>
                 <ol class="leaderboard" id="racer-leaderboard" aria-live="polite">${renderLeaderboard()}</ol>
                 <form id="racer-initials-form" class="initials-form" autocomplete="off">
                     <label for="racer-initials">Your Initials</label>
-                    <input id="racer-initials" name="initials" maxlength="3" placeholder="ALX" spellcheck="false" autocomplete="off">
+                    <input id="racer-initials" name="initials" maxlength="3" placeholder="ALX" spellcheck="false" autocomplete="off" autocapitalize="characters">
                 </form>
                 <div class="modal-actions">
                     <button type="submit" form="racer-initials-form" id="racer-save" class="btn btn-primary">Save Score</button>
                     <button type="button" id="racer-again" class="btn btn-ghost">Play Again</button>
+                    <button type="button" id="racer-home" class="btn btn-ghost">Home</button>
                 </div>
             </div>`;
         container.appendChild(overlay);
@@ -502,27 +504,44 @@ export function init(container) {
         const form = overlay.querySelector('#racer-initials-form');
         const input = overlay.querySelector('#racer-initials');
         const saveBtn = overlay.querySelector('#racer-save');
+        const againBtn = overlay.querySelector('#racer-again');
         let saved = false;
 
-        form.addEventListener('submit', (e) => {
-            e.preventDefault();
-            if (saved) return;
-            saved = true;
-            const initials = (input.value.trim().toUpperCase() || '???').slice(0, 3);
-            saveHighScore(initials, Math.floor(score));
-            overlay.querySelector('#racer-leaderboard').innerHTML = renderLeaderboard();
-            saveBtn.textContent = 'Saved ✓';
-            saveBtn.disabled = true;
-            input.disabled = true;
+        // Restrict initials to 1–3 capital letters
+        input.addEventListener('input', () => {
+            const cleaned = input.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3);
+            if (cleaned !== input.value) input.value = cleaned;
         });
 
-        overlay.querySelector('#racer-again').addEventListener('click', () => {
+        if (finalScore > 0) {
+            form.addEventListener('submit', (e) => {
+                e.preventDefault();
+                if (saved) return;
+                saved = true;
+                const initials = (input.value.trim().toUpperCase() || '???').slice(0, 3);
+                saveHighScore(initials, finalScore);
+                overlay.querySelector('#racer-leaderboard').innerHTML = renderLeaderboard();
+                saveBtn.textContent = 'Saved ✓';
+                saveBtn.disabled = true;
+                input.disabled = true;
+            });
+            input.focus();
+        } else {
+            // Zero score: skip the record entry
+            form.remove();
+            saveBtn.remove();
+            againBtn.focus();
+        }
+
+        againBtn.addEventListener('click', () => {
             overlay.remove();
             overlayOpen = false;
             resetRun();
         });
 
-        input.focus();
+        overlay.querySelector('#racer-home').addEventListener('click', () => {
+            window.dispatchEvent(new CustomEvent('hub:home'));
+        });
     }
 
     // ---------- Lane control ----------

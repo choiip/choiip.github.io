@@ -151,4 +151,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Back to hub
     backBtn.addEventListener('click', stopGame);
+
+    // Games request the lobby from their game-over modal (Home button)
+    window.addEventListener('hub:home', stopGame);
 });

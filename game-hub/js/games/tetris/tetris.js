@@ -5,8 +5,16 @@ export function init(container) {
     const COLS = 12;
     const ROWS = 20;
     const PANEL_COLS = 5; // side panel width, in cells
-    const DROP_MS = 1000; // gravity: one cell per second
     const CLEAR_MS = 420; // line-clear animation: flash + collapse
+    const GRAVITY_MS = [1000, 850, 720, 610, 510, 420, 340, 270, 210, 160, 120, 90]; // ms per cell, by level
+    const LEVEL_LINES = 10; // lines cleared per speed level
+    const PRESSURE_BASE_MS = 22500; // idle time before a garbage row lands at level 1
+    const PRESSURE_MIN_MS = 12500; // pressure threshold floor
+    const PRESSURE_LEVEL_STEP_MS = 1000; // threshold cut per level
+    const PRESSURE_WARN_MS = 5000; // glow + ticks during the final 5s
+    const PRESSURE_REWIND_MS = 7500; // timer rewind per cleared line
+    const GARBAGE_COLOR = '#4b5563'; // dull-gray pressure row (drawn flat, no glow)
+    const GARBAGE_MS = 200; // whole-field rise when a garbage row lands
 
     const canvas = document.createElement('canvas');
     canvas.width = (COLS + PANEL_COLS) * SCALE;
@@ -47,20 +55,84 @@ export function init(container) {
         'Z': [[1,1,0], [0,1,1], [0,0,0]]
     };
 
-    // Audio Context for sound effects
+    // Audio Context for sound effects and background music
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    function playSound(freq, type, duration) {
-        if (audioCtx.state === 'suspended') audioCtx.resume();
+    function playTone(freq, type, duration, when, gainLevel, dest) {
+        const t = when === undefined ? audioCtx.currentTime : when;
         const osc = audioCtx.createOscillator();
         const gain = audioCtx.createGain();
         osc.type = type;
-        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
-        gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+        osc.frequency.setValueAtTime(freq, t);
+        gain.gain.setValueAtTime(gainLevel, t);
+        gain.gain.exponentialRampToValueAtTime(0.01, t + duration);
         osc.connect(gain);
-        gain.connect(audioCtx.destination);
-        osc.start();
-        osc.stop(audioCtx.currentTime + duration);
+        gain.connect(dest || audioCtx.destination);
+        osc.start(t);
+        osc.stop(t + duration);
+    }
+
+    function playSound(freq, type, duration) {
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        playTone(freq, type, duration, undefined, 0.1);
+    }
+
+    // Background music rides its own gain node so it sits under the SFX
+    const musicGain = audioCtx.createGain();
+    musicGain.gain.value = 0;
+    musicGain.connect(audioCtx.destination);
+
+    // ---------------- Background music ----------------
+    // A dark 16-step ostinato: driving low pulse + A-minor arpeggio + click
+    // hats. It quietly accelerates with level and pressure, and twists into
+    // a dissonant E/Eb tremolo during the garbage warning window.
+    const MUSIC_BASS = [55, 0, 55, 0, 55, 0, 55, 0, 49, 0, 49, 0, 43.65, 0, 55, 0]; // A–G–F descent
+    const MUSIC_ARP = [220, 0, 261.63, 0, 329.63, 0, 440, 0, 329.63, 0, 261.63, 0, 220, 0, 329.63, 0];
+    let musicArmed = false; // a user gesture has unlocked the AudioContext
+    let musicOn = false;
+    let musicStep = 0;
+    let musicNextTime = 0;
+
+    function musicTempo() {
+        const bpm = Math.min(96 + (level - 1) * 4, 160);
+        const frac = Math.min(1, pressure / pressureLimit());
+        return bpm * (1 + 0.25 * frac * frac); // creeps faster as the garbage row nears
+    }
+
+    function startMusic() {
+        if (musicOn || isGameOver) return;
+        musicArmed = true;
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        musicOn = true;
+        musicNextTime = 0; // scheduleMusic re-anchors to the audio clock
+        musicGain.gain.cancelScheduledValues(audioCtx.currentTime);
+        musicGain.gain.setValueAtTime(0, audioCtx.currentTime);
+        musicGain.gain.linearRampToValueAtTime(1, audioCtx.currentTime + 1.5);
+    }
+
+    function stopMusic(fade) {
+        musicOn = false;
+        const now = audioCtx.currentTime;
+        musicGain.gain.cancelScheduledValues(now);
+        musicGain.gain.setValueAtTime(musicGain.gain.value, now);
+        musicGain.gain.linearRampToValueAtTime(0, now + (fade === undefined ? 0.5 : fade));
+    }
+
+    function scheduleMusic() {
+        if (!musicOn || isGameOver || audioCtx.state !== 'running') return;
+        const now = audioCtx.currentTime;
+        if (musicNextTime < now) musicNextTime = now + 0.05; // recover after start or a hidden tab
+        while (musicNextTime < now + 0.25) { // schedule a short horizon ahead for tight timing
+            const stepDur = 60 / musicTempo() / 4; // sixteenth notes
+            const warning = pressureLimit() - pressure <= PRESSURE_WARN_MS;
+            const bass = MUSIC_BASS[musicStep];
+            if (bass) playTone(bass, 'sawtooth', stepDur * 1.7, musicNextTime, 0.045, musicGain);
+            // Arpeggio; the warning window swaps it for a semitone dread-tremolo
+            const arp = warning ? (musicStep % 2 === 0 ? 659.25 : 622.25) : MUSIC_ARP[musicStep];
+            if (arp) playTone(arp, 'square', stepDur * 0.9, musicNextTime, warning ? 0.02 : 0.015, musicGain);
+            if (musicStep % 4 === 3) playTone(5800, 'square', 0.02, musicNextTime, 0.012, musicGain); // click hat
+            musicNextTime += stepDur;
+            musicStep = (musicStep + 1) % MUSIC_BASS.length;
+        }
     }
 
     // ---------------- Small helpers ----------------
@@ -143,6 +215,11 @@ export function init(container) {
     let score = 0;
     let lines = 0;
     let bestScore = 0;
+    let level = 1;
+    let combo = 0; // consecutive locking pieces that each cleared at least one line
+    let backToBack = false; // previous clear was a Tetris
+    let pressure = 0; // ms accumulated without clearing a line
+    let warnTick = 0; // which pressure warning ticks have already sounded
     let player = {
         pos: {x: 0, y: 0},
         matrix: null,
@@ -164,6 +241,7 @@ export function init(container) {
     let floaters = [];
     let shake = { mag: 0, start: 0, dur: 0 };
     let previewStart = 0;
+    let garbageAnim = null; // { start } — field-rise after a pressure row lands
 
     // ---------------- Piece generation (7-bag) ----------------
     function createPiece() {
@@ -300,17 +378,51 @@ export function init(container) {
     }
 
     // ---------------- Game flow ----------------
-    function resolveClearedRows(rows) {
-        const points = rows.length * rows.length * 10; // 10 / 40 / 90 / 160
+    function addScore(points) {
         score += points;
-        lines += rows.length;
         scoreDisplay.textContent = `Score: ${score}`;
+    }
+
+    function gravityMs() {
+        return GRAVITY_MS[Math.min(level, GRAVITY_MS.length) - 1];
+    }
+
+    function pressureLimit() {
+        return Math.max(PRESSURE_BASE_MS - (level - 1) * PRESSURE_LEVEL_STEP_MS, PRESSURE_MIN_MS);
+    }
+
+    function resolveClearedRows(rows) {
+        const n = rows.length;
+        combo++;
+        const isTetris = n === 4;
+        let points = n * n * 10 * level; // quadratic curve, scaled by speed level
+        let tag = ['SINGLE', 'DOUBLE', 'TRIPLE', 'TETRIS'][n - 1];
+        if (isTetris && backToBack) {
+            points = Math.round(points * 1.5);
+            tag += ' B2B';
+        }
+        if (combo > 1) points += 10 * combo;
+        backToBack = isTetris;
+        addScore(points);
+        lines += n;
+        // Any clear rewinds the pressure timer
+        pressure = Math.max(0, pressure - n * PRESSURE_REWIND_MS);
+        warnTick = 0;
+
+        const newLevel = 1 + Math.floor(lines / LEVEL_LINES);
+
         // Line-clear arpeggio — one note per cleared line
         const notes = [440, 554, 659, 880];
-        for (let i = 0; i < Math.min(rows.length, 4); i++) {
+        for (let i = 0; i < Math.min(n, 4); i++) {
             setTimeout(() => playSound(notes[i], 'square', 0.12), i * 70);
         }
+        if (isTetris) setTimeout(() => playSound(1175, 'square', 0.2), 300); // sparkle note
+
         if (reduced()) {
+            if (newLevel > level) {
+                level = newLevel;
+                playSound(660, 'square', 0.12);
+            }
             removeRows(rows);
             playerReset();
             return;
@@ -321,9 +433,34 @@ export function init(container) {
         floaters.push({
             x: COLS / 2,
             y: rows[rows.length >> 1] + 0.4,
-            text: `+${points}`,
+            text: `${tag} +${points}`,
+            color: isTetris ? '#fbbf24' : '#e9d5ff',
+            size: isTetris ? 0.66 : 0.5,
             start: performance.now()
         });
+        if (combo > 1) {
+            floaters.push({
+                x: COLS / 2,
+                y: rows[rows.length >> 1] + 1.5,
+                text: `COMBO ×${combo}`,
+                color: '#67e8f9',
+                size: 0.45,
+                start: performance.now()
+            });
+        }
+        if (newLevel > level) {
+            level = newLevel;
+            floaters.push({
+                x: COLS / 2,
+                y: ROWS * 0.4,
+                text: `LEVEL ${level}`,
+                color: '#fde68a',
+                size: 0.75,
+                start: performance.now()
+            });
+            playSound(660, 'square', 0.12);
+            setTimeout(() => playSound(880, 'square', 0.16), 100);
+        }
     }
 
     function finishLineClear() {
@@ -353,16 +490,19 @@ export function init(container) {
         if (rows.length > 0) {
             resolveClearedRows(rows);
         } else {
+            combo = 0; // a piece that clears nothing breaks the combo
             playerReset();
         }
     }
 
-    function playerDrop() {
+    function playerDrop(scored) {
         if (isGameOver || lineClear) return;
         player.pos.y++;
         if (collide(arena, player)) {
             player.pos.y--;
             lockPiece(false);
+        } else if (scored) {
+            addScore(1); // soft-drop reward (gravity drops score nothing)
         }
         dropCounter = 0;
     }
@@ -378,6 +518,7 @@ export function init(container) {
         player.pos.y = probe.pos.y - 1;
         renderPos.y = player.pos.y; // snap — no interpolation for a hard drop
         dropCounter = 0;
+        if (dist > 1) addScore((dist - 1) * 2); // hard-drop reward, per cell actually fallen
         lockPiece(true);
     }
 
@@ -411,9 +552,27 @@ export function init(container) {
         }
     }
 
-    function gameOver() {
+    function insertGarbage() {
+        pressure = 0;
+        warnTick = 0;
+        if (arena[0].some(v => v !== 0)) {
+            gameOver('Field Overflow');
+            return;
+        }
+        const gap = Math.floor(Math.random() * COLS);
+        arena.shift();
+        arena.push(Array.from({ length: COLS }, (_, x) => (x === gap ? 0 : GARBAGE_COLOR)));
+        if (!reduced()) garbageAnim = { start: performance.now() };
+        player.pos.y--; // the active piece rides the field up
+        if (slam) slam.cells.forEach(c => c.y--); // keep the squash over the shifted stack
+        triggerShake(6, 200);
+        playSound(90, 'sawtooth', 0.18); // ominous thud
+    }
+
+    function gameOver(headline = 'Game Over') {
         isGameOver = true;
 
+        stopMusic(0.8);
         playSound(220, 'sawtooth', 0.5);
 
         // Blur canvas
@@ -460,7 +619,7 @@ export function init(container) {
         overlay.innerHTML = `
             <div class="modal" role="dialog" aria-modal="true" aria-labelledby="tetris-modal-title">
                 <h2 id="tetris-modal-title">${headline}</h2>
-                <p class="final-score">Final score: <strong>${finalScore}</strong></p>
+                <p class="final-score">Final score: <strong>${finalScore}</strong><br>Level ${level} · ${lines} lines</p>
                 <ol class="leaderboard" id="tetris-leaderboard" aria-live="polite">${renderLeaderboard()}</ol>
                 <form id="tetris-initials-form" class="initials-form" autocomplete="off">
                     <label for="tetris-initials">Your Initials</label>
@@ -545,6 +704,11 @@ export function init(container) {
             collapse = t < 0.35 ? 0 : easeOutCubic((t - 0.35) / 0.65);
         }
         const cleared = lineClear ? lineClear.rows : null;
+        // The whole field eases upward into place when a garbage row lands
+        let rise = 0;
+        if (garbageAnim && !reduced()) {
+            rise = 1 - easeOutCubic(Math.min(1, (time - garbageAnim.start) / GARBAGE_MS));
+        }
         for (let y = 0; y < ROWS; y++) {
             for (let x = 0; x < COLS; x++) {
                 const v = arena[y][x];
@@ -556,9 +720,23 @@ export function init(container) {
                     for (const ry of cleared) if (ry > y) below++;
                     dy = below * collapse;
                 }
-                drawBlockAt(x, y + dy, v);
+                drawBlockAt(x, y + dy + rise, v);
             }
         }
+    }
+
+    function drawPressureGlow(time) {
+        if (isGameOver) return;
+        const remaining = pressureLimit() - pressure;
+        if (remaining > PRESSURE_WARN_MS) return;
+        const urgency = 1 - remaining / PRESSURE_WARN_MS; // 0..1
+        const pulse = reduced() ? 1 : 0.75 + 0.25 * Math.sin(time / 90);
+        const alpha = (0.12 + 0.28 * urgency) * pulse;
+        const grad = ctx.createLinearGradient(0, ROWS - 2, 0, ROWS);
+        grad.addColorStop(0, 'rgba(244, 63, 94, 0)');
+        grad.addColorStop(1, `rgba(244, 63, 94, ${alpha.toFixed(3)})`);
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, ROWS - 2, COLS, 2);
     }
 
     function drawClearFlash(time) {
@@ -639,9 +817,9 @@ export function init(container) {
                 continue;
             }
             ctx.globalAlpha = 1 - t;
-            ctx.font = '700 0.55px system-ui, -apple-system, sans-serif';
+            ctx.font = `700 ${f.size || 0.55}px system-ui, -apple-system, sans-serif`;
             ctx.textAlign = 'center';
-            ctx.fillStyle = '#e9d5ff';
+            ctx.fillStyle = f.color || '#e9d5ff';
             ctx.fillText(f.text, f.x, f.y - t * 1.4);
         }
         ctx.globalAlpha = 1;
@@ -698,16 +876,45 @@ export function init(container) {
         ctx.lineTo(PX1 - 0.3, 7.35);
         ctx.stroke();
 
-        panelText('LINES', PCX, 8.4, 0.5, 600, 0.5);
-        panelText(String(lines), PCX, 9.85, 0.95, 700, 0.95, '255, 255, 255');
+        panelText('LINES', PCX, 8.15, 0.42, 600, 0.5);
+        panelText(String(lines), PCX, 9.2, 0.8, 700, 0.95, '255, 255, 255');
 
         ctx.beginPath();
-        ctx.moveTo(PX0 + 0.3, 10.6);
-        ctx.lineTo(PX1 - 0.3, 10.6);
+        ctx.moveTo(PX0 + 0.3, 9.8);
+        ctx.lineTo(PX1 - 0.3, 9.8);
         ctx.stroke();
 
-        panelText('BEST', PCX, 11.65, 0.5, 600, 0.5);
-        panelText(String(bestScore), PCX, 13.1, 0.95, 700, 0.95, '255, 255, 255');
+        panelText('LEVEL', PCX, 10.6, 0.42, 600, 0.5);
+        panelText(String(level), PCX, 11.65, 0.8, 700, 0.95, '255, 255, 255');
+
+        ctx.beginPath();
+        ctx.moveTo(PX0 + 0.3, 12.25);
+        ctx.lineTo(PX1 - 0.3, 12.25);
+        ctx.stroke();
+
+        panelText('BEST', PCX, 13.05, 0.42, 600, 0.5);
+        panelText(String(bestScore), PCX, 14.1, 0.8, 700, 0.95, '255, 255, 255');
+
+        // Combo readout only while a combo chain is alive
+        if (combo > 1) {
+            panelText(`COMBO ×${combo}`, PCX, 15.15, 0.45, 700, 0.9, '103, 232, 249');
+        }
+
+        // Pressure bar — fills as the idle timer nears a garbage row
+        const limit = pressureLimit();
+        const frac = Math.max(0, Math.min(1, pressure / limit));
+        const barX = PX0 + 0.45;
+        const barW = PX1 - PX0 - 0.9;
+        panelText('PRESSURE', PCX, 16.45, 0.4, 600, 0.5);
+        ctx.fillStyle = 'rgba(10, 7, 18, 0.5)';
+        roundRectPath(ctx, barX, 16.75, barW, 0.34, 0.1);
+        ctx.fill();
+        if (frac > 0.02) {
+            const warnFrac = 1 - PRESSURE_WARN_MS / limit;
+            ctx.fillStyle = frac >= warnFrac ? '#fb7185' : frac > 0.55 ? '#fbbf24' : '#a78bfa';
+            roundRectPath(ctx, barX + 0.05, 16.8, (barW - 0.1) * frac, 0.24, 0.08);
+            ctx.fill();
+        }
 
         panelText('SPACE · HARD DROP', PCX, 19.4, 0.5, 500, 0.3);
     }
@@ -732,6 +939,7 @@ export function init(container) {
 
         drawGrid();
         drawArena(time);
+        drawPressureGlow(time);
         drawSlam(time);
         if (lineClear) drawClearFlash(time);
         if (!lineClear && !isGameOver) {
@@ -754,8 +962,21 @@ export function init(container) {
                 if (time - lineClear.start >= CLEAR_MS) finishLineClear();
             } else {
                 dropCounter += deltaTime;
-                if (dropCounter > DROP_MS) playerDrop();
+                if (dropCounter > gravityMs()) playerDrop(false);
+                // Idle time without clears builds pressure; at the threshold a garbage row lands
+                pressure += deltaTime;
+                const remaining = pressureLimit() - pressure;
+                if (remaining <= PRESSURE_WARN_MS && warnTick < 1) {
+                    warnTick = 1;
+                    playSound(200, 'triangle', 0.12); // 5s tick
+                }
+                if (remaining <= PRESSURE_WARN_MS / 2 && warnTick < 2) {
+                    warnTick = 2;
+                    playSound(170, 'triangle', 0.16); // 2.5s tick
+                }
+                if (remaining <= 0) insertGarbage();
             }
+            if (garbageAnim && time - garbageAnim.start >= GARBAGE_MS) garbageAnim = null;
             // Ease the rendered position toward the grid position
             const k = reduced() ? 1 : Math.min(1, deltaTime / 80);
             renderPos.x += (player.pos.x - renderPos.x) * k;
@@ -766,6 +987,7 @@ export function init(container) {
             updateParticles(deltaTime / 1000);
         }
 
+        scheduleMusic();
         draw(time);
         rafId = requestAnimationFrame(update);
     }
@@ -773,7 +995,8 @@ export function init(container) {
     // ---------------- Controls ----------------
     function keyDownHandler(e) {
         if (isGameOver || lineClear) return;
-        if (e.code === 'Space') {
+        if (!musicOn) startMusic(); // first key press unlocks the AudioContext
+        if (e.code === 'Space' || e.key === ' ') {
             e.preventDefault();
             playerHardDrop();
             return;
@@ -781,7 +1004,7 @@ export function init(container) {
         switch(e.key) {
             case 'ArrowLeft': playerMove(-1); break;
             case 'ArrowRight': playerMove(1); break;
-            case 'ArrowDown': playerDrop(); break;
+            case 'ArrowDown': playerDrop(true); break;
             case 'ArrowUp': playerRotate(); break;
         }
     }
@@ -817,6 +1040,7 @@ export function init(container) {
     function touchStartHandler(e) {
         if (isGameOver || lineClear) return;
         e.preventDefault();
+        if (!musicOn) startMusic();
         const touch = e.touches[0];
         touchStartX = lastTouchX = touch.clientX;
         touchStartY = lastTouchY = touch.clientY;
@@ -832,7 +1056,7 @@ export function init(container) {
                     stopSoftDrop();
                     return;
                 }
-                playerDrop();
+                playerDrop(true);
             }, 80);
         }, 280);
     }
@@ -868,7 +1092,7 @@ export function init(container) {
         steps = 0;
         while (carryY >= cellH - 0.5 && steps < 6) {
             if (isGameOver) break;
-            playerDrop();
+            playerDrop(true);
             carryY -= cellH;
             steps++;
         }
@@ -910,6 +1134,11 @@ export function init(container) {
         arena = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
         score = 0;
         lines = 0;
+        level = 1;
+        combo = 0;
+        backToBack = false;
+        pressure = 0;
+        warnTick = 0;
         scoreDisplay.textContent = 'Score: 0';
         bestScore = getScores()[0] ? getScores()[0].score : 0;
         canvas.style.filter = 'none';
@@ -917,6 +1146,7 @@ export function init(container) {
         nextPiece = createPiece();
         lineClear = null;
         slam = null;
+        garbageAnim = null;
         particles = [];
         floaters = [];
         shake = { mag: 0, start: 0, dur: 0 };
@@ -925,6 +1155,7 @@ export function init(container) {
         isGameOver = false;
         stopSoftDrop();
         clearLongPress();
+        if (musicArmed) startMusic(); // resume the music on Play Again
         playerReset();
         if (rafId) cancelAnimationFrame(rafId);
         rafId = requestAnimationFrame(update);
@@ -936,6 +1167,7 @@ export function init(container) {
         destroy: () => {
             destroyed = true;
             cancelAnimationFrame(rafId);
+            stopMusic(0.1);
             window.removeEventListener('keydown', keyDownHandler);
             clearLongPress();
             stopSoftDrop();
@@ -943,6 +1175,7 @@ export function init(container) {
             canvas.removeEventListener('touchmove', touchMoveHandler);
             canvas.removeEventListener('touchend', touchEndHandler);
             document.removeEventListener('touchmove', pageTouchMoveHandler);
+            if (audioCtx.close) audioCtx.close().catch(() => {});
         }
     };
 }

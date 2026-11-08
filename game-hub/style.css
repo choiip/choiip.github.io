@@ -267,8 +267,8 @@ body {
 }
 
 .game-card[data-game='pinball'] {
-    --card-accent: #f5b506;
-    --card-accent-glow: rgba(245, 181, 6, 0.35);
+    --card-accent: #38bdf8;
+    --card-accent-glow: rgba(56, 189, 248, 0.35);
 }
 
 .game-card[data-game='neural-strike'] {

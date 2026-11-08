@@ -16,7 +16,7 @@ A minimalist, vanilla JavaScript arcade hub featuring a collection of self-conta
 | **Breakout** | 🎾 | Keep the ball alive, smash the wall. |
 | **Flappy Bird** | 🐦 | Tap to flap. Dodge the pipes. Survive. |
 | **Neon Glide** | 🏎️ | Dodge neon traffic down a 3D synthwave highway. |
-| **Micro Pinball** | 🎱 | A marble gets lost on a cluttered desk. Plunger, flippers, big bonks. |
+| **Star Cadet Pinball** | 🚀 | A full-size sci-fi table in the classic arcade style. Ramps, spinners, drop banks, ball save. |
 | **Neural Strike** | ⚡ | Sync to the data stream and breach the corporate mainframe. |
 | **Gravity Faller** | 🌀 | Rotate gravity, land soft, break glass at speed. |
 

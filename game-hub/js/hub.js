@@ -12,7 +12,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const trophyEmpty = document.getElementById('trophy-popover-empty');
     const trophyButtons = document.querySelectorAll('.trophy-btn');
 
-    const GAME_NAMES = { snake: 'Snake', tetris: 'Tetris', breakout: 'Breakout', flappy: 'Flappy Bird', racer: 'Neon Glide', pinball: 'Star Cadet Pinball', 'neural-strike': 'Neural Strike', 'gravity-faller': 'Gravity Faller' };
+    const GAME_NAMES = { snake: 'Snake', tetris: 'Tetris', breakout: 'Breakout', flappy: 'Flappy Bird', racer: 'Neon Glide', pinball: 'Star Cadet Pinball', 'neural-strike': 'Neural Strike', 'gravity-faller': 'Gravity Faller', blockade: 'Blocade' };
     let activeTrophy = null;
     let hideTimer = null;
 

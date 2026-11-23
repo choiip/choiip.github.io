@@ -276,6 +276,11 @@ body {
     --card-accent-glow: rgba(192, 132, 252, 0.35);
 }
 
+.game-card[data-game='blockade'] {
+    --card-accent: #34d399;
+    --card-accent-glow: rgba(52, 211, 153, 0.35);
+}
+
 .game-icon {
     display: grid;
     place-items: center;
